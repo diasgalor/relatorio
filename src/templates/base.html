@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Resumo Operacional - Diário</title>
+  <link rel="stylesheet" href="../static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Resumo Operacional — Diário</h1>
+        <div class="subtitle">Fonte: {{csv_name}}</div>
+      </div>
+    </header>
+
+    {{cards_html}}
+
+    <section class="grid">
+      <div class="panel col-4">
+        <h2>Estado Operacional</h2>
+        <img src="{{img_pizza}}" alt="Gráfico pizza estado operacional" />
+        <div class="muted">Distribuição percentual por estado</div>
+      </div>
+
+      <div class="panel col-8">
+        <h2>TOP 5 — Estado x Operador</h2>
+        {{tbl_top5}}
+      </div>
+
+      <div class="panel col-6">
+        <h2>Área por Operador</h2>
+        <img src="{{img_area_op}}" alt="Área por operador" />
+      </div>
+
+      <div class="panel col-6">
+        <h2>Área por Equipamento</h2>
+        <img src="{{img_area_eq}}" alt="Área por equipamento" />
+      </div>
+    </section>
+
+    <footer>
+      Gerado automaticamente. Ajuste as colunas no script Python se necessário.
+    </footer>
+  </div>
+</body>
+</html>
