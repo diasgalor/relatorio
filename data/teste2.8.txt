@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Gestão Regional v2.8</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #0056b3; --secondary-color: #007bff; --light-gray: #f8f9fa;
+            --dark-gray: #343a40; --border-color: #dee2e6; --success-color: #28a745; --danger-color: #dc3545; --warning-color: #ffc107;
+            --risk-safe-bg: #d4edda; --risk-safe-text: #155724;
+            --risk-warn-bg: #fff3cd; --risk-warn-text: #856404;
+            --risk-high-bg: #f8d7da; --risk-high-text: #721c24;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background-color: #e9ecef; color: var(--dark-gray); margin: 0; padding: 20px; }
+        .container { max-width: 1800px; margin: auto; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
+        h1, h2, h3 { color: var(--primary-color); }
+        .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .btn { background-color: var(--primary-color); color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-weight: 500; transition: background-color 0.2s; }
+        .btn:hover { background-color: var(--secondary-color); }
+        .btn-success { background-color: var(--success-color); }
+        .btn-danger { background-color: var(--danger-color); }
+        .btn-danger:hover { background-color: #c82333; }
+        .tabs { display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 25px; flex-wrap: wrap; }
+        .tab-button { padding: 12px 25px; cursor: pointer; border: none; background-color: transparent; font-size: 16px; font-weight: 500; border-bottom: 3px solid transparent; }
+        .tab-button.active { border-bottom-color: var(--primary-color); color: var(--primary-color); }
+        .tab-content { display: none; animation: fadeIn 0.5s; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+        th, td { border: 1px solid var(--border-color); padding: 8px; text-align: left; vertical-align: middle; }
+        th { background-color: var(--light-gray); font-weight: 600; }
+        td[contenteditable="true"] { background-color: #fef9e7; cursor: pointer; }
+        .risk-matrix-container { display: grid; grid-template-columns: 1fr 350px; gap: 30px; }
+        .risk-score-input { width: 50px; text-align: center; padding: 5px; border: 1px solid var(--border-color); border-radius: 4px; font-size: 12px; }
+        .score-cell, .classification-cell { font-weight: bold; text-align: center; }
+        .risk-safe { background-color: var(--risk-safe-bg); color: var(--risk-safe-text); }
+        .risk-warn { background-color: var(--risk-warn-bg); color: var(--risk-warn-text); }
+        .risk-high { background-color: var(--risk-high-bg); color: var(--risk-high-text); }
+        .top-risks-card { background-color: var(--light-gray); padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); }
+        .top-risks-card h3 { margin-top: 0; }
+        .top-risks-list { list-style-type: none; padding: 0; }
+        .top-risks-list li { background: white; padding: 10px; border-radius: 4px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        #logContainer { max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); padding: 15px; border-radius: 5px; background: var(--light-gray); }
+        .log-entry { font-family: 'Courier New', Courier, monospace; font-size: 12px; margin-bottom: 8px; }
+        .chart-wrapper { max-width: 600px; margin: 20px auto; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px; }
+        .dashboard-card { background: var(--light-gray); padding: 20px; border-radius: 8px; border: 2px solid var(--border-color); text-align: center; }
+        .dashboard-card h3 { margin: 0 0 10px 0; color: var(--primary-color); }
+        .dashboard-card .value { font-size: 32px; font-weight: bold; color: var(--primary-color); }
+        .dashboard-card .label { font-size: 12px; color: #666; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container" id="dashboard-container">
+    <div class="header">
+        <h1>Dashboard de Gestão Regional</h1>
+        <div class="controls">
+            <input type="text" id="userName" placeholder="Seu nome (editor)" style="padding: 8px; border: 1px solid var(--border-color); border-radius: 5px;">
+            <button class="btn btn-success" onclick="importData()">Importar JSON</button>
+            <button class="btn" onclick="exportData()">Exportar JSON</button>
+            <button class="btn btn-danger" onclick="exportToPDF()">Exportar PDF</button>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-button active" onclick="openTab(event, 'riskMatrix')">Matriz de Risco</button>
+        <button class="tab-button" onclick="openTab(event, 'dashboard')">Dashboard Operacional</button>
+        <button class="tab-button" onclick="openTab(event, 'planoAcao')">Plano de Ação</button>
+        <button class="tab-button" onclick="openTab(event, 'gimb')">Gestão GIMB</button>
+        <button class="tab-button" onclick="openTab(event, 'historico')">Histórico</button>
+    </div>
+
+    <!-- ABA 1: MATRIZ DE RISCO -->
+    <div id="riskMatrix" class="tab-content active">
+        <h2>Matriz de Risco de Clientes (com Dados Operacionais)</h2>
+        <div class="risk-matrix-container">
+            <div class="table-wrapper" style="overflow-x:auto;">
+                <table id="riskMatrixTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="2">Cliente</th>
+                            <th colspan="6">Critérios (0-5)</th>
+                            <th rowspan="2">Pontuação</th>
+                            <th rowspan="2">Classificação</th>
+                            <th rowspan="2">Coordenador</th>
+                            <th rowspan="2">Analista</th>
+                            <th rowspan="2">RTV</th>
+                            <th rowspan="2">Bordos</th>
+                            <th rowspan="2">Clima</th>
+                            <th rowspan="2">Hectare</th>
+                            <th rowspan="2">Sinais/Ações</th>
+                        </tr>
+                        <tr>
+                            <th>Relacionamento</th><th>Satisfação</th><th>Financeiro</th><th>Operacional</th><th>Engajamento</th><th>Concorrência</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <button class="btn" onclick="addRiskClientRow()">+ Adicionar Cliente à Matriz</button>
+            </div>
+            <div class="top-risks-card">
+                <h3>Top 5 Clientes de Risco</h3><ol id="topRisksList" class="top-risks-list"></ol><hr>
+                <h3>⚠️ Sinais Silenciosos de Saída</h3>
+                <ul style="font-size: 12px; padding-left: 20px;">
+                    <li>Param de pedir melhoria</li><li>Trocam gestores internos</li><li>Reduzem contato executivo</li>
+                    <li>Começam auditorias excessivas</li><li>Questionam valor do contrato</li><li>Pedem benchmarking com mercado</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- ABA 2: DASHBOARD OPERACIONAL -->
+    <div id="dashboard" class="tab-content">
+        <h2>Dashboard Operacional - Acompanhamento Regional</h2>
+        <div class="dashboard-grid">
+            <div class="dashboard-card">
+                <h3>Total de Bordos</h3>
+                <div class="value" id="totalBordos">0</div>
+                <div class="label">Unidades</div>
+            </div>
+            <div class="dashboard-card">
+                <h3>Total de Clima</h3>
+                <div class="value" id="totalClima">0</div>
+                <div class="label">Unidades</div>
+            </div>
+            <div class="dashboard-card">
+                <h3>Total de Hectares</h3>
+                <div class="value" id="totalHectare">0</div>
+                <div class="label">Hectares</div>
+            </div>
+            <div class="dashboard-card">
+                <h3>Clientes Ativos</h3>
+                <div class="value" id="totalClientes">0</div>
+                <div class="label">Clientes</div>
+            </div>
+            <div class="dashboard-card">
+                <h3>Clientes em Risco</h3>
+                <div class="value" id="clientesRisco">0</div>
+                <div class="label">Alto Risco</div>
+            </div>
+            <div class="dashboard-card">
+                <h3>Média de Risco</h3>
+                <div class="value" id="mediaRisco">0</div>
+                <div class="label">Pontos</div>
+            </div>
+        </div>
+        <div class="chart-wrapper"><canvas id="operationalChart"></canvas></div>
+    </div>
+
+    <!-- ABA 3: PLANO DE AÇÃO -->
+    <div id="planoAcao" class="tab-content">
+        <h2>Plano de Ação Estratégico</h2>
+        <div class="chart-wrapper"><canvas id="actionPlanChart"></canvas></div>
+        <table id="actionPlanTable">
+            <thead><tr><th>Ponto de Atenção</th><th>O que será feito?</th><th>Responsável</th><th>Data Início</th><th>Data Final</th><th>Status</th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <button class="btn" onclick="addActionRow()">+ Adicionar Ação</button>
+    </div>
+
+    <!-- ABA 4: GESTÃO GIMB -->
+    <div id="gimb" class="tab-content">
+        <h2>Checklist Padrão Regional para Avaliação GIMB</h2>
+        <table id="gimbTable">
+            <thead><tr><th>Item do Checklist</th><th>Status</th><th>Observações</th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <button class="btn" onclick="addGimbRow()">+ Adicionar Item ao Checklist</button>
+    </div>
+    
+    <!-- ABA 5: HISTÓRICO -->
+    <div id="historico" class="tab-content">
+        <h2>Histórico de Alterações</h2>
+        <div id="logContainer"></div>
+    </div>
+</div>
+
+<script>
+    const initialData = {
+        riskClients: [
+            { id: 1, name: 'Cliente Exemplo A', scores: [0,1,0,1,0,1], coordenador: 'João Silva', analista: 'Maria Santos', rtv: 'Pedro Costa', bordos: 100, clima: 50, hectare: 250, notes: 'Tudo OK' },
+            { id: 2, name: 'Cliente Exemplo B', scores: [3,4,2,3,4,2], coordenador: 'Ana Paula', analista: 'Carlos Mendes', rtv: 'Lucas Ferreira', bordos: 200, clima: 120, hectare: 500, notes: 'Reclama muito' },
+            { id: 3, name: 'Cliente Exemplo C', scores: [5,5,4,5,5,5], coordenador: 'Roberto Lima', analista: 'Fernanda Gomes', rtv: 'Marcelo Alves', bordos: 150, clima: 80, hectare: 350, notes: 'Alto risco' }
+        ],
+        actions: [
+            { id: 1, area: 'Mapear Contratos', what: 'Verificar todos os contratos com término em 2026', who: 'Gerente Regional', start: '2026-03-01', end: '2026-03-15', status: 'Em Andamento' }
+        ],
+        gimb: [
+            { id: 1, item: 'Percepção do Cliente', status: 'OK', notes: '' }
+        ],
+        log: []
+    };
+    let actionPlanChart, operationalChart;
+
+    function getFullData() { const data = {}; for (const key in initialData) { const saved = localStorage.getItem(`dashboardData_${key}`); data[key] = saved ? JSON.parse(saved) : (initialData[key] || []); } return data; }
+    function getData(key) { return getFullData()[key]; }
+    function setData(key, data) { localStorage.setItem(`dashboardData_${key}`, JSON.stringify(data)); }
+    function logChange(action) { const userName = document.getElementById('userName').value.trim() || 'Anônimo'; const log = getData('log'); const timestamp = new Date().toLocaleString('pt-BR'); log.unshift({ timestamp, user: userName, action }); setData('log', log); renderLog(); }
+
+    function renderAll() { renderRiskMatrix(); renderActionTable(); renderGimbTable(); renderLog(); updateDashboard(); }
+    function calculateRisk(scores) { const total = scores.reduce((sum, score) => sum + (parseInt(score, 10) || 0), 0); if (total <= 10) return { total, classification: '🟢 Seguro', className: 'risk-safe' }; if (total <= 18) return { total, classification: '🟡 Atenção', className: 'risk-warn' }; return { total, classification: '🔴 Alto Risco', className: 'risk-high' }; }
+    
+    function renderRiskMatrix() {
+        const tableBody = document.querySelector('#riskMatrixTable tbody');
+        tableBody.innerHTML = '';
+        getData('riskClients').forEach(client => {
+            const row = tableBody.insertRow();
+            row.dataset.id = client.id;
+            const risk = calculateRisk(client.scores);
+            let scoreInputs = client.scores.map((score, index) => `<td><input type="number" min="0" max="5" class="risk-score-input" data-index="${index}" value="${score || 0}"></td>`).join('');
+            row.innerHTML = `<td contenteditable="true" data-key="name">${client.name}</td>${scoreInputs}<td class="score-cell">${risk.total}</td><td class="classification-cell ${risk.className}">${risk.classification}</td><td contenteditable="true" data-key="coordenador">${client.coordenador}</td><td contenteditable="true" data-key="analista">${client.analista}</td><td contenteditable="true" data-key="rtv">${client.rtv}</td><td><input type="number" class="risk-score-input" data-key="bordos" value="${client.bordos || 0}" min="0"></td><td><input type="number" class="risk-score-input" data-key="clima" value="${client.clima || 0}" min="0"></td><td><input type="number" class="risk-score-input" data-key="hectare" value="${client.hectare || 0}" min="0"></td><td contenteditable="true" data-key="notes">${client.notes}</td>`;
+        });
+        updateTopRisks();
+    }
+
+    function renderActionTable() {
+        const tableBody = document.querySelector('#actionPlanTable tbody');
+        tableBody.innerHTML = '';
+        getData('actions').forEach(action => {
+            const row = tableBody.insertRow();
+            row.dataset.id = action.id;
+            row.innerHTML = `<td contenteditable="true" data-key="area">${action.area}</td><td contenteditable="true" data-key="what">${action.what}</td><td contenteditable="true" data-key="who">${action.who}</td><td contenteditable="true" data-key="start">${action.start}</td><td contenteditable="true" data-key="end">${action.end}</td><td contenteditable="true" data-key="status">${action.status}</td>`;
+        });
+        updateActionPlanChart();
+    }
+
+    function renderGimbTable() {
+        const tableBody = document.querySelector('#gimbTable tbody');
+        tableBody.innerHTML = '';
+        getData('gimb').forEach(item => {
+            const row = tableBody.insertRow();
+            row.dataset.id = item.id;
+            row.innerHTML = `<td contenteditable="true" data-key="item">${item.item}</td><td contenteditable="true" data-key="status">${item.status}</td><td contenteditable="true" data-key="notes">${item.notes}</td>`;
+        });
+    }
+
+    function renderLog() { const logContainer = document.getElementById('logContainer'); logContainer.innerHTML = ''; getData('log').forEach(entry => { logContainer.innerHTML += `<div class="log-entry"><span class="timestamp">[${entry.timestamp}]</span> <span class="user">${entry.user}</span>: ${entry.action}</span></div>`; }); }
+    
+    function updateTopRisks() { const list = document.getElementById('topRisksList'); list.innerHTML = ''; const clients = getData('riskClients').map(c => ({ name: c.name, ...calculateRisk(c.scores) })).sort((a, b) => b.total - a.total); const top5 = clients.slice(0, 5); if (top5.length === 0 || top5[0].total === 0) { list.innerHTML = '<li>Nenhum risco significativo.</li>'; return; } top5.forEach(client => { if (client.total > 0) { const li = document.createElement('li'); li.className = client.className; li.innerHTML = `<span>${client.name}</span> <span class="score">${client.total}</span>`; list.appendChild(li); } }); }
+    
+    function updateDashboard() {
+        const clients = getData('riskClients');
+        const totalBordos = clients.reduce((sum, c) => sum + (parseInt(c.bordos) || 0), 0);
+        const totalClima = clients.reduce((sum, c) => sum + (parseInt(c.clima) || 0), 0);
+        const totalHectare = clients.reduce((sum, c) => sum + (parseInt(c.hectare) || 0), 0);
+        const clientesRisco = clients.filter(c => calculateRisk(c.scores).total >= 19).length;
+        const mediaRisco = clients.length > 0 ? Math.round(clients.reduce((sum, c) => sum + calculateRisk(c.scores).total, 0) / clients.length) : 0;
+
+        document.getElementById('totalBordos').textContent = totalBordos.toLocaleString('pt-BR');
+        document.getElementById('totalClima').textContent = totalClima.toLocaleString('pt-BR');
+        document.getElementById('totalHectare').textContent = totalHectare.toLocaleString('pt-BR');
+        document.getElementById('totalClientes').textContent = clients.length;
+        document.getElementById('clientesRisco').textContent = clientesRisco;
+        document.getElementById('mediaRisco').textContent = mediaRisco;
+
+        updateOperationalChart(clients);
+    }
+
+    function updateOperationalChart(clients) {
+        const data = {
+            labels: clients.map(c => c.name),
+            datasets: [
+                { label: 'Bordos', data: clients.map(c => c.bordos || 0), backgroundColor: 'rgba(0, 123, 255, 0.7)' },
+                { label: 'Clima', data: clients.map(c => c.clima || 0), backgroundColor: 'rgba(40, 167, 69, 0.7)' },
+                { label: 'Hectare', data: clients.map(c => c.hectare || 0), backgroundColor: 'rgba(255, 193, 7, 0.7)' }
+            ]
+        };
+        const ctx = document.getElementById('operationalChart').getContext('2d');
+        if (operationalChart) { operationalChart.data = data; operationalChart.update(); } 
+        else { operationalChart = new Chart(ctx, { type: 'bar', data: data, options: { responsive: true, scales: { y: { beginAtZero: true } } } }); }
+    }
+
+    function updateActionPlanChart() {
+        const actions = getData('actions');
+        const today = dayjs();
+        const counts = { onTime: 0, dueSoon: 0, overdue: 0 };
+        actions.forEach(action => {
+            if (!action.end || action.status === 'Concluído') return;
+            const endDate = dayjs(action.end);
+            if (endDate.isBefore(today, 'day')) {
+                counts.overdue++;
+            } else if (endDate.diff(today, 'day') <= 7) {
+                counts.dueSoon++;
+            } else {
+                counts.onTime++;
+            }
+        });
+        const data = {
+            labels: ['No Prazo', 'Próximo do Vencimento', 'Fora do Prazo'],
+            datasets: [{ label: 'Status do Plano de Ação', data: [counts.onTime, counts.dueSoon, counts.overdue], backgroundColor: ['rgba(40, 167, 69, 0.7)', 'rgba(255, 193, 7, 0.7)', 'rgba(220, 53, 69, 0.7)'] }]
+        };
+        const ctx = document.getElementById('actionPlanChart').getContext('2d');
+        if (actionPlanChart) { actionPlanChart.data = data; actionPlanChart.update(); } 
+        else { actionPlanChart = new Chart(ctx, { type: 'bar', data: data, options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } } } }); }
+    }
+
+    function openTab(evt, tabName) { document.querySelectorAll('.tab-content').forEach(tc => tc.style.display = "none"); document.querySelectorAll('.tab-button').forEach(tb => tb.classList.remove('active')); document.getElementById(tabName).style.display = "block"; evt.currentTarget.classList.add('active'); }
+    function addRiskClientRow() { const clients = getData('riskClients'); const newId = (clients.length > 0 ? Math.max(...clients.map(c => c.id)) : 0) + 1; const newClient = { id: newId, name: 'Novo Cliente', scores: [0,0,0,0,0,0], coordenador: '', analista: '', rtv: '', bordos: 0, clima: 0, hectare: 0, notes: '' }; clients.push(newClient); setData('riskClients', clients); logChange(`adicionou cliente à matriz: "${newClient.name}"`); renderRiskMatrix(); updateDashboard(); }
+    function addActionRow() { const actions = getData('actions'); const newId = (actions.length > 0 ? Math.max(...actions.map(a => a.id)) : 0) + 1; const newAction = { id: newId, area: 'Nova Área', what: 'Definir Ação', who: 'A definir', start: dayjs().format('YYYY-MM-DD'), end: dayjs().add(7, 'day').format('YYYY-MM-DD'), status: 'Não Iniciado' }; actions.push(newAction); setData('actions', actions); logChange(`adicionou nova ação: "${newAction.area}"`); renderActionTable(); }
+    function addGimbRow() { const gimb = getData('gimb'); const newId = (gimb.length > 0 ? Math.max(...gimb.map(g => g.id)) : 0) + 1; const newItem = { id: newId, item: 'Novo Item do Checklist', status: 'Pendente', notes: '' }; gimb.push(newItem); setData('gimb', gimb); logChange(`adicionou item ao GIMB: "${newItem.item}"`); renderGimbTable(); }
+
+    function setupTableListener(tableId, dataKey, identifierKey) { 
+        document.getElementById(tableId).addEventListener('focusout', (e) => { 
+            if (e.target.isContentEditable && e.target.dataset.key) { 
+                const row = e.target.closest('tr'); 
+                const id = parseInt(row.dataset.id); 
+                const key = e.target.dataset.key; 
+                const newValue = e.target.innerText; 
+                const data = getData(dataKey); 
+                const item = data.find(i => i.id === id); 
+                if (item && item[key] !== newValue) { 
+                    const oldValue = item[key]; 
+                    item[key] = newValue; 
+                    setData(dataKey, data); 
+                    logChange(`alterou "${key}" de "${oldValue}" para "${newValue}" em "${item[identifierKey]}"`); 
+                    if (dataKey === 'riskClients') { renderRiskMatrix(); updateDashboard(); }
+                    if (dataKey === 'actions') renderActionTable(); 
+                } 
+            } 
+        }); 
+    }
+
+    document.addEventListener('DOMContentLoaded', () => { 
+        renderAll(); 
+        document.getElementById('userName').value = localStorage.getItem('dashboardUserName') || ''; 
+        setupTableListener('riskMatrixTable', 'riskClients', 'name'); 
+        setupTableListener('actionPlanTable', 'actions', 'area'); 
+        setupTableListener('gimbTable', 'gimb', 'item'); 
+    });
+    
+    document.getElementById('userName').addEventListener('change', (e) => { localStorage.setItem('dashboardUserName', e.target.value); });
+    
+    document.getElementById('riskMatrixTable').addEventListener('change', (e) => { 
+        if (e.target.classList.contains('risk-score-input')) { 
+            const row = e.target.closest('tr'); 
+            const id = parseInt(row.dataset.id); 
+            const clients = getData('riskClients'); 
+            const client = clients.find(c => c.id === id); 
+            if (e.target.dataset.index !== undefined) {
+                client.scores[e.target.dataset.index] = parseInt(e.target.value, 10) || 0;
+            } else if (e.target.dataset.key) {
+                client[e.target.dataset.key] = parseInt(e.target.value, 10) || 0;
+            }
+            setData('riskClients', clients); 
+            logChange(`atualizou scores do cliente "${client.name}"`); 
+            renderRiskMatrix(); 
+            updateDashboard();
+        } 
+    });
+    
+    function exportToPDF() { const { jsPDF } = window.jspdf; const activeTab = document.querySelector('.tab-content.active'); if (!activeTab) { alert("Nenhuma aba ativa para exportar."); return; } logChange(`iniciou exportação para PDF da aba "${activeTab.id}".`); html2canvas(activeTab, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }).then(canvas => { const imgData = canvas.toDataURL('image/png'); const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [canvas.width, canvas.height] }); pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height); pdf.save('dashboard_relatorio.pdf'); }).catch(err => { console.error("Erro ao gerar o PDF:", err); alert("Ocorreu um erro ao gerar o PDF."); }); }
+    function exportData() { const data = getFullData(); const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'dashboard_data.json'; a.click(); URL.revokeObjectURL(a.href); logChange('exportou os dados (JSON).'); }
+    function importData() { const input = document.createElement('input'); input.type = 'file'; input.accept = '.json'; input.onchange = e => { const file = e.target.files[0]; const reader = new FileReader(); reader.onload = readerEvent => { try { const importedData = JSON.parse(readerEvent.target.result); for (const key in importedData) { setData(key, importedData[key]); } logChange('importou e substituiu os dados.'); renderAll(); } catch (err) { alert('Erro ao ler o arquivo.'); } }; reader.readAsText(file, 'UTF-8'); }; input.click(); }
+</script>
+</body>
+</html>
