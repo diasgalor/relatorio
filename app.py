@@ -264,12 +264,12 @@ def build_client_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def seed_action_plan(client_df: pd.DataFrame) -> pd.DataFrame:
-    top_risk = client_df.head(5)
-    if top_risk.empty:
+    attention_clients = client_df[client_df["classificacao"].isin(["Alto Risco", "Atencao"])].copy()
+    if attention_clients.empty:
         return pd.DataFrame(columns=ACTION_PLAN_COLUMNS)
 
     rows = []
-    for _, row in top_risk.iterrows():
+    for _, row in attention_clients.sort_values(["pontuacao", "cliente"], ascending=[True, True]).iterrows():
         rows.append(
             {
                 "Cliente": row["cliente"],
@@ -308,10 +308,42 @@ def normalize_action_plan_df(action_plan: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def sync_action_plan_with_clients(action_plan: pd.DataFrame, client_df: pd.DataFrame) -> pd.DataFrame:
+    normalized = normalize_action_plan_df(action_plan)
+    attention_clients = client_df[client_df["classificacao"].isin(["Alto Risco", "Atencao"])].copy()
+    if attention_clients.empty:
+        return normalized
+
+    existing_clients = set(normalized["Cliente"].astype(str).str.strip())
+    rows_to_add: list[dict[str, str]] = []
+    for _, row in attention_clients.sort_values(["pontuacao", "cliente"], ascending=[True, True]).iterrows():
+        client_name = str(row["cliente"]).strip()
+        if client_name in existing_clients:
+            continue
+        rows_to_add.append(
+            {
+                "Cliente": client_name,
+                "Ponto de atencao": str(row["classificacao"]).strip(),
+                "Acao": "Validar percepcao do cliente e plano de retencao com gestor e analista.",
+                "Responsavel": row["gestor"] or row["analista"] or "Definir",
+                "Prazo": "",
+                "Status": "Nao iniciado",
+                "Atualizacao": "",
+                "Proximo passo": "Agendar alinhamento com coordenador e analista.",
+            }
+        )
+
+    if not rows_to_add:
+        return normalized
+
+    merged = pd.concat([normalized, pd.DataFrame(rows_to_add, columns=ACTION_PLAN_COLUMNS)], ignore_index=True)
+    return normalize_action_plan_df(merged)
+
+
 def ensure_action_plan_state(client_df: pd.DataFrame) -> pd.DataFrame:
     if "action_plan" not in st.session_state:
         st.session_state["action_plan"] = seed_action_plan(client_df)
-    st.session_state["action_plan"] = normalize_action_plan_df(st.session_state["action_plan"])
+    st.session_state["action_plan"] = sync_action_plan_with_clients(st.session_state["action_plan"], client_df)
     return st.session_state["action_plan"]
 
 
@@ -368,20 +400,24 @@ def build_action_plan_monitor(action_plan: pd.DataFrame) -> tuple[pd.DataFrame, 
 def summarize_client_action_state(client_actions: pd.DataFrame) -> dict[str, str | int | bool]:
     if client_actions.empty:
         return {
+            "total_acoes": 0,
             "andamento": 0,
             "concluidas": 0,
             "atrasadas": 0,
             "sem_atualizacao": 0,
+            "progresso_pct": 0.0,
             "ultima_atualizacao": "Sem atualizacao",
             "status_label": "Sem plano",
             "expanded": False,
             "priority_rank": 3,
         }
 
+    total_acoes = int(len(client_actions))
     andamento = int(client_actions["bucket"].eq("em_andamento").sum())
     concluidas = int(client_actions["bucket"].eq("concluido").sum())
     atrasadas = int(client_actions["atrasado"].sum())
     sem_atualizacao = int(client_actions["sem_atualizacao"].sum())
+    progresso_pct = (concluidas / total_acoes) * 100 if total_acoes else 0.0
     latest_updates = [
         value.strip()
         for value in client_actions["Atualizacao"].astype(str).tolist()
@@ -407,10 +443,12 @@ def summarize_client_action_state(client_actions: pd.DataFrame) -> dict[str, str
         priority_rank = 2
 
     return {
+        "total_acoes": total_acoes,
         "andamento": andamento,
         "concluidas": concluidas,
         "atrasadas": atrasadas,
         "sem_atualizacao": sem_atualizacao,
+        "progresso_pct": progresso_pct,
         "ultima_atualizacao": ultima_atualizacao,
         "status_label": status_label,
         "expanded": expanded,
@@ -1520,10 +1558,12 @@ def inject_theme() -> None:
     )
 
 
-def render_hero(summary: DatasetSummary, csv_path: Path, client_df: pd.DataFrame) -> None:
+def render_hero(base_df: pd.DataFrame, csv_path: Path, client_df: pd.DataFrame) -> None:
     criticos = int(client_df["classificacao"].eq("Alto Risco").sum())
     atencao = int(client_df["classificacao"].eq("Atencao").sum())
     media_risco = float(client_df["pontuacao"].mean()) if not client_df.empty else 0.0
+    total_clientes = int(client_df["cliente"].nunique()) if "cliente" in client_df.columns else 0
+    total_analistas = int(base_df["analista"].replace("", pd.NA).dropna().nunique()) if not base_df.empty else 0
     html_block = f"""
     <section class="hero-card">
         <div class="hero-grid">
@@ -1535,8 +1575,8 @@ def render_hero(summary: DatasetSummary, csv_path: Path, client_df: pd.DataFrame
                     e apontar rapidamente quais contas merecem atencao imediata.
                 </p>
                 <div class="hero-chips">
-                    <span class="hero-chip">{summary.clients} clientes</span>
-                    <span class="hero-chip">{summary.analysts} analistas ativos</span>
+                    <span class="hero-chip">{total_clientes} clientes</span>
+                    <span class="hero-chip">{total_analistas} analistas ativos</span>
                     <span class="hero-chip">{atencao} em atencao</span>
                     <span class="hero-chip">Fonte: {html.escape(csv_path.name)}</span>
                 </div>
@@ -2042,12 +2082,12 @@ def render_attention_clients(client_df: pd.DataFrame) -> None:
             """
             <section class="section-shell attention-shell">
                 <h2 class="section-title">Clientes que precisam de atencao</h2>
-                <p class="section-subtitle">Abra cada cliente para acompanhar o plano de acao, o andamento e os proximos passos da equipe.</p>
+                <p class="section-subtitle">Quando um cliente entra em atencao ou alto risco, ele ja passa a exigir acao e acompanhamento de execucao neste mesmo bloco.</p>
             </section>
             """
         )
 
-        focus_clients = client_df.head(6).copy()
+        focus_clients = client_df[client_df["classificacao"].isin(["Alto Risco", "Atencao"])].copy()
         if focus_clients.empty:
             st.info("Nenhum cliente em foco com os filtros atuais.")
             return
@@ -2055,97 +2095,182 @@ def render_attention_clients(client_df: pd.DataFrame) -> None:
         focus_clients["priority_rank"] = focus_clients["cliente"].apply(
             lambda name: summarize_client_action_state(monitor[monitor["Cliente"].eq(name)]).get("priority_rank", 3)
         )
-        focus_clients = focus_clients.sort_values(["priority_rank", "pontuacao"], ascending=[True, False])
+        focus_clients = focus_clients.sort_values(["priority_rank", "pontuacao", "cliente"], ascending=[True, True, True])
 
-        for _, row in focus_clients.iterrows():
-            client_actions = monitor[monitor["Cliente"].eq(row["cliente"])].copy()
-            client_state = summarize_client_action_state(client_actions)
+        client_options = ["Todos os clientes"] + focus_clients["cliente"].tolist()
+        selected_client = st.selectbox(
+            "Filtrar cliente dentro do bloco",
+            client_options,
+            key="attention_client_filter",
+        )
+        visible_clients = (
+            focus_clients if selected_client == "Todos os clientes" else focus_clients[focus_clients["cliente"].eq(selected_client)].copy()
+        )
 
-            if client_state["status_label"] == "Atrasado":
-                pill_tone = "critical"
-            elif client_state["status_label"] == "Em andamento":
-                pill_tone = "warning"
-            elif client_state["status_label"] == "Concluido":
-                pill_tone = "safe"
-            else:
-                pill_tone = "neutral"
+        monitored_clients = int(visible_clients["cliente"].isin(monitor["Cliente"]).sum()) if not monitor.empty else 0
+        total_actions = int(monitor["Cliente"].isin(visible_clients["cliente"]).sum()) if not monitor.empty else 0
+        overdue_actions = (
+            int(monitor.loc[monitor["Cliente"].isin(visible_clients["cliente"]), "atrasado"].sum())
+            if not monitor.empty
+            else 0
+        )
+        in_progress_actions = (
+            int(monitor.loc[monitor["Cliente"].isin(visible_clients["cliente"]), "bucket"].eq("em_andamento").sum())
+            if not monitor.empty
+            else 0
+        )
+        completed_actions = (
+            int(monitor.loc[monitor["Cliente"].isin(visible_clients["cliente"]), "bucket"].eq("concluido").sum())
+            if not monitor.empty
+            else 0
+        )
+        progress_pct = (completed_actions / total_actions) * 100 if total_actions else 0.0
 
-            header = (
-                f'{row["cliente"]} | {row["classificacao"]} | {int(row["pontuacao"])} pts'
-                f' | {client_state["status_label"]}'
-                f' | Ultima atualizacao: {client_state["ultima_atualizacao"]}'
+        cards = st.columns(6)
+        with cards[0]:
+            render_metric_card(
+                "Clientes em foco",
+                format_int(len(visible_clients)),
+                "Clientes em atencao e alto risco",
+                "critical",
+            )
+        with cards[1]:
+            render_metric_card(
+                "Com plano",
+                format_int(monitored_clients),
+                "Clientes ja acompanhados",
+                "warning",
+            )
+        with cards[2]:
+            render_metric_card(
+                "Acoes abertas",
+                format_int(total_actions),
+                "Frentes cadastradas no plano",
+                "neutral",
+            )
+        with cards[3]:
+            render_metric_card(
+                "Progresso",
+                f"{progress_pct:.0f}%",
+                "Percentual de acoes concluidas",
+                "safe" if progress_pct >= 70 else "warning",
+            )
+        with cards[4]:
+            render_metric_card(
+                "Em andamento",
+                format_int(in_progress_actions),
+                "Execucao em curso",
+                "warning",
+            )
+        with cards[5]:
+            render_metric_card(
+                "Atrasadas",
+                format_int(overdue_actions),
+                "Prazo vencido sem conclusao",
+                "critical",
             )
 
-            with st.expander(header, expanded=bool(client_state["expanded"])):
-                render_html_block(
-                    f"""
-                    <section class="client-banner">
-                        <div class="client-banner-top">
-                            <div>
-                                <h3 class="client-banner-title">{html.escape(row["cliente"])}</h3>
-                                <p class="client-banner-subtitle">{html.escape(row["sinais"])}</p>
-                            </div>
-                            <span class="status-pill {pill_tone}">{html.escape(str(client_state["status_label"]))}</span>
-                        </div>
-                        <div class="info-grid">
-                            <div class="info-chip">
-                                <div class="info-chip-label">Gestor</div>
-                                <div class="info-chip-value">{html.escape(row["gestor"] or "Nao definido")}</div>
-                            </div>
-                            <div class="info-chip">
-                                <div class="info-chip-label">Analista</div>
-                                <div class="info-chip-value">{html.escape(row["analista"] or "Nao definido")}</div>
-                            </div>
-                            <div class="info-chip">
-                                <div class="info-chip-label">Distancia media</div>
-                                <div class="info-chip-value">{format_float(float(row["distancia_media_km"]), 0)} km</div>
-                            </div>
-                        </div>
-                    </section>
-                    <section class="mini-metric-grid">
-                        <article class="mini-metric warning">
-                            <div class="mini-metric-label">Em andamento</div>
-                            <div class="mini-metric-value">{format_int(int(client_state["andamento"]))}</div>
-                            <div class="mini-metric-note">Acoes ativas</div>
-                        </article>
-                        <article class="mini-metric safe">
-                            <div class="mini-metric-label">Concluidas</div>
-                            <div class="mini-metric-value">{format_int(int(client_state["concluidas"]))}</div>
-                            <div class="mini-metric-note">Ja finalizadas</div>
-                        </article>
-                        <article class="mini-metric critical">
-                            <div class="mini-metric-label">Atrasadas</div>
-                            <div class="mini-metric-value">{format_int(int(client_state["atrasadas"]))}</div>
-                            <div class="mini-metric-note">Prazo vencido</div>
-                        </article>
-                        <article class="mini-metric neutral">
-                            <div class="mini-metric-label">Sem atualizacao</div>
-                            <div class="mini-metric-value">{format_int(int(client_state["sem_atualizacao"]))}</div>
-                            <div class="mini-metric-note">Sem retorno</div>
-                        </article>
-                        <article class="mini-metric neutral">
-                            <div class="mini-metric-label">Total de acoes</div>
-                            <div class="mini-metric-value">{format_int(len(client_actions))}</div>
-                            <div class="mini-metric-note">Frentes abertas</div>
-                        </article>
-                    </section>
-                    """
+        details_label = (
+            f"Mostrar clientes listados ({len(visible_clients)})"
+            if selected_client == "Todos os clientes"
+            else f"Mostrar detalhes de {selected_client}"
+        )
+        show_client_list = st.toggle(details_label, value=False, key="attention_show_client_list")
+        if show_client_list:
+            for _, row in visible_clients.iterrows():
+                client_actions = monitor[monitor["Cliente"].eq(row["cliente"])].copy()
+                client_state = summarize_client_action_state(client_actions)
+
+                if client_state["status_label"] == "Atrasado":
+                    pill_tone = "critical"
+                elif client_state["status_label"] == "Em andamento":
+                    pill_tone = "warning"
+                elif client_state["status_label"] == "Concluido":
+                    pill_tone = "safe"
+                else:
+                    pill_tone = "neutral"
+
+                header = (
+                    f'{row["cliente"]} | {row["classificacao"]} | {int(row["pontuacao"])} pts'
+                    f' | {client_state["status_label"]}'
+                    f' | Ultima atualizacao: {client_state["ultima_atualizacao"]}'
                 )
 
-                if client_actions.empty:
-                    st.info("Esse cliente ainda nao possui acao cadastrada no Plano de Acao.")
-                else:
+                with st.expander(header, expanded=False):
                     render_html_block(
-                        """
-                        <p class="table-caption">
-                            Plano de acao e andamento registrado pela equipe para esta conta.
-                        </p>
+                        f"""
+                        <section class="client-banner">
+                            <div class="client-banner-top">
+                                <div>
+                                    <h3 class="client-banner-title">{html.escape(row["cliente"])}</h3>
+                                    <p class="client-banner-subtitle">Acompanhamento de execucao para cliente priorizado na visao executiva.</p>
+                                </div>
+                                <span class="status-pill {pill_tone}">{html.escape(str(client_state["status_label"]))}</span>
+                            </div>
+                            <div class="info-grid">
+                                <div class="info-chip">
+                                    <div class="info-chip-label">Gestor</div>
+                                    <div class="info-chip-value">{html.escape(row["gestor"] or "Nao definido")}</div>
+                                </div>
+                                <div class="info-chip">
+                                    <div class="info-chip-label">Analista</div>
+                                    <div class="info-chip-value">{html.escape(row["analista"] or "Nao definido")}</div>
+                                </div>
+                                <div class="info-chip">
+                                    <div class="info-chip-label">Distancia media</div>
+                                    <div class="info-chip-value">{format_float(float(row["distancia_media_km"]), 0)} km</div>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="mini-metric-grid">
+                            <article class="mini-metric warning">
+                                <div class="mini-metric-label">Em andamento</div>
+                                <div class="mini-metric-value">{format_int(int(client_state["andamento"]))}</div>
+                                <div class="mini-metric-note">Acoes ativas</div>
+                            </article>
+                            <article class="mini-metric neutral">
+                                <div class="mini-metric-label">Progresso</div>
+                                <div class="mini-metric-value">{float(client_state["progresso_pct"]):.0f}%</div>
+                                <div class="mini-metric-note">Percentual concluido</div>
+                            </article>
+                            <article class="mini-metric safe">
+                                <div class="mini-metric-label">Concluidas</div>
+                                <div class="mini-metric-value">{format_int(int(client_state["concluidas"]))}</div>
+                                <div class="mini-metric-note">Ja finalizadas</div>
+                            </article>
+                            <article class="mini-metric critical">
+                                <div class="mini-metric-label">Atrasadas</div>
+                                <div class="mini-metric-value">{format_int(int(client_state["atrasadas"]))}</div>
+                                <div class="mini-metric-note">Prazo vencido</div>
+                            </article>
+                            <article class="mini-metric neutral">
+                                <div class="mini-metric-label">Sem atualizacao</div>
+                                <div class="mini-metric-value">{format_int(int(client_state["sem_atualizacao"]))}</div>
+                                <div class="mini-metric-note">Sem retorno</div>
+                            </article>
+                            <article class="mini-metric neutral">
+                                <div class="mini-metric-label">Total de acoes</div>
+                                <div class="mini-metric-value">{format_int(len(client_actions))}</div>
+                                <div class="mini-metric-note">Frentes abertas</div>
+                            </article>
+                        </section>
                         """
                     )
-                    view = client_actions[
-                        ["Acao", "Responsavel", "Prazo", "Status", "Atualizacao", "Proximo passo"]
-                    ]
-                    render_clean_table(view)
+
+                    if client_actions.empty:
+                        st.info("Esse cliente ainda nao possui acao cadastrada no Plano de Acao.")
+                    else:
+                        render_html_block(
+                            """
+                            <p class="table-caption">
+                                Plano de acao e andamento registrado pela equipe para esta conta.
+                            </p>
+                            """
+                        )
+                        view = client_actions[
+                            ["Acao", "Responsavel", "Prazo", "Status", "Atualizacao", "Proximo passo"]
+                        ]
+                        render_clean_table(view)
 
 
 def render_overview_tab(
@@ -2154,7 +2279,7 @@ def render_overview_tab(
     summary: DatasetSummary,
     csv_path: Path,
 ) -> None:
-    render_hero(summary, csv_path, client_df)
+    render_hero(base_df, csv_path, client_df)
     with st.container():
         render_html_block(
             """
@@ -2168,7 +2293,6 @@ def render_overview_tab(
         )
         render_summary_cards(client_df, base_df)
     render_attention_clients(client_df)
-    render_signal_monitoring_block(client_df)
 
 
 def render_risk_tab(client_df: pd.DataFrame) -> None:
