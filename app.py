@@ -801,7 +801,7 @@ def inject_theme() -> None:
             gap: 0.95rem;
         }
         .panorama-metric {
-            min-height: 132px;
+            min-height: 156px;
             padding: 1rem 1rem 0.95rem 1rem;
             border-radius: 22px;
             border: 1px solid rgba(29, 52, 49, 0.08);
@@ -810,6 +810,9 @@ def inject_theme() -> None:
             box-shadow:
                 0 10px 24px rgba(23, 35, 33, 0.05),
                 inset 0 1px 0 rgba(255, 255, 255, 0.7);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         .panorama-metric.critical { border-left-color: var(--red); }
         .panorama-metric.warning { border-left-color: var(--amber); }
@@ -939,6 +942,13 @@ def inject_theme() -> None:
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.panorama-shell) .stColumn {
             position: relative;
         }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.panorama-shell) [data-testid="column"] {
+            display: flex;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.panorama-shell) [data-testid="column"] > div {
+            width: 100%;
+            height: 100%;
+        }
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.panorama-shell) [data-testid="stHorizontalBlock"] {
             align-items: stretch;
         }
@@ -958,10 +968,14 @@ def inject_theme() -> None:
             padding: 0 0.15rem 0.45rem 0.15rem;
             margin-bottom: 0.85rem;
         }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.metric-card) {
+            height: 100%;
+        }
         .metric-card {
             padding: 1.02rem 1rem 0.98rem 1rem;
             border-radius: var(--radius-lg);
-            min-height: 114px;
+            min-height: 178px;
+            height: 178px;
             box-shadow:
                 0 12px 26px rgba(23, 35, 33, 0.05),
                 0 1px 0 rgba(255, 255, 255, 0.72) inset;
@@ -969,24 +983,41 @@ def inject_theme() -> None:
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 244, 237, 0.88));
             border: 1px solid rgba(29, 52, 49, 0.08);
             border-left: 4px solid transparent;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
         }
         .metric-label {
             color: var(--muted);
             font-size: 0.82rem;
             text-transform: uppercase;
             letter-spacing: 0.08em;
+            line-height: 1.45;
+            min-height: 2.9em;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         .metric-value {
             margin-top: 0.65rem;
             font-size: 1.85rem;
             font-weight: 700;
             line-height: 1;
+            min-height: 1.2em;
         }
         .metric-note {
-            margin-top: 0.5rem;
+            margin-top: auto;
+            padding-top: 0.65rem;
             color: var(--muted);
             font-size: 0.9rem;
             line-height: 1.35;
+            min-height: 4.05em;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         .metric-critical {
             border-left-color: var(--red);
@@ -1536,6 +1567,94 @@ def render_metric_card(label: str, value: str, note: str, tone: str = "safe") ->
     )
 
 
+def render_panorama_metrics(metrics: list[tuple[str, str, str, str]]) -> None:
+    cards_html = "".join(
+        f"""
+        <div class="panorama-metric {tone}">
+            <div class="metric-label">{html.escape(label)}</div>
+            <div class="metric-value">{html.escape(value)}</div>
+            <div class="metric-note">{html.escape(note)}</div>
+        </div>
+        """
+        for label, value, note, tone in metrics
+    )
+
+    html_block = f"""
+    <html>
+        <head>
+            <style>
+                html, body {{
+                    margin: 0;
+                    padding: 0;
+                    background: transparent;
+                    font-family: "Segoe UI", sans-serif;
+                }}
+                .panorama-metrics {{
+                    display: grid;
+                    grid-template-columns: repeat(4, minmax(0, 1fr));
+                    gap: 0.95rem;
+                    padding: 0.05rem;
+                }}
+                .panorama-metric {{
+                    box-sizing: border-box;
+                    height: 178px;
+                    padding: 1.02rem 1rem 0.98rem 1rem;
+                    border-radius: 22px;
+                    border: 1px solid rgba(29, 52, 49, 0.08);
+                    border-left: 4px solid rgba(29, 52, 49, 0.18);
+                    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 244, 237, 0.9));
+                    box-shadow:
+                        0 12px 26px rgba(23, 35, 33, 0.05),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+                    display: flex;
+                    flex-direction: column;
+                }}
+                .panorama-metric.critical {{ border-left-color: #B64545; }}
+                .panorama-metric.warning {{ border-left-color: #C38A2D; }}
+                .panorama-metric.safe {{ border-left-color: #2F6B55; }}
+                .panorama-metric.neutral {{ border-left-color: rgba(29, 52, 49, 0.18); }}
+                .metric-label {{
+                    color: #62706C;
+                    font-size: 0.82rem;
+                    text-transform: uppercase;
+                    letter-spacing: 0.08em;
+                    line-height: 1.45;
+                    min-height: 2.9em;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                }}
+                .metric-value {{
+                    margin-top: 0.65rem;
+                    min-height: 1.2em;
+                    color: #143746;
+                    font-size: 1.85rem;
+                    font-weight: 700;
+                    line-height: 1;
+                }}
+                .metric-note {{
+                    margin-top: auto;
+                    padding-top: 0.65rem;
+                    min-height: 4.05em;
+                    color: #62706C;
+                    font-size: 0.9rem;
+                    line-height: 1.35;
+                    display: -webkit-box;
+                    -webkit-line-clamp: 3;
+                    -webkit-box-orient: vertical;
+                    overflow: hidden;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="panorama-metrics">{cards_html}</div>
+        </body>
+    </html>
+    """
+    components.html(textwrap.dedent(html_block).strip(), height=390, scrolling=False)
+
+
 def render_summary_cards(client_df: pd.DataFrame, base_df: pd.DataFrame) -> None:
     total_equip = int(client_df["equip_cb"].sum() + client_df["equip_clima"].sum())
     total_clientes = int(len(client_df))
@@ -1556,35 +1675,13 @@ def render_summary_cards(client_df: pd.DataFrame, base_df: pd.DataFrame) -> None
         ("Area total (ha)", format_int(base_df["area_ha"].sum()), "Escala operacional da carteira", "neutral"),
     ]
 
-    metrics_html = "".join(
-        f"""
-        <article class="panorama-metric {tone}">
-            <div class="metric-label">{html.escape(label)}</div>
-            <div class="metric-value">{html.escape(value)}</div>
-            <div class="metric-note">{html.escape(note)}</div>
-        </article>
-        """
-        for label, value, note, tone in metrics
-    )
-
     left, right = st.columns([0.98, 1.92], gap="large")
     with left:
         st.markdown("#### Composicao da carteira")
         st.caption("Distribuicao executiva entre alto risco, atencao e clientes seguros.")
         render_portfolio_donut(total_clientes, clientes_risco, clientes_atencao, clientes_seguro)
     with right:
-        row_one = metrics[:4]
-        row_two = metrics[4:]
-
-        cards = st.columns(4, gap="medium")
-        for column, (label, value, note, tone) in zip(cards, row_one):
-            with column:
-                render_metric_card(label, value, note, tone)
-
-        cards = st.columns(4, gap="medium")
-        for column, (label, value, note, tone) in zip(cards, row_two):
-            with column:
-                render_metric_card(label, value, note, tone)
+        render_panorama_metrics(metrics)
 
 
 def build_signal_summary(client_df: pd.DataFrame) -> list[dict[str, str | int]]:
@@ -2070,8 +2167,8 @@ def render_overview_tab(
             """
         )
         render_summary_cards(client_df, base_df)
-    render_signal_monitoring_block(client_df)
     render_attention_clients(client_df)
+    render_signal_monitoring_block(client_df)
 
 
 def render_risk_tab(client_df: pd.DataFrame) -> None:
